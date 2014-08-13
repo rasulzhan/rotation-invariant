@@ -1,0 +1,213 @@
+CImg<float> nlmeans2(CImg<float> img = NULL, int patch_size = 1, double lamda =
+		-1, double alpha = 3, double sigma = -1, int sampling = 1) {
+	if (img.is_empty()) {
+		if (sigma < 0) {
+			sigma = sqrt(img.variance_noise());
+		}
+		const double np = (2 * patch_size + 1) * (2 * patch_size + 1)
+				* img.spectrum() / (double) sampling;
+		if (lamda < 0) {
+			;
+
+			if (np < 100) {
+				lamda = ((((((1.1785e-12 * np - 5.1827e-10) * np + 9.5946e-08)
+						* np - 9.7798e-06) * np + 6.0756e-04) * np - 0.0248)
+						* np + 1.9203) * np + 7.9599;
+			} else {
+				lamda = (-7.2611e-04 * np + 1.3213) * np + 15.2726;
+			}
+		}
+		CImg<float> dest(img.width(), img.height(), img.depth(), img.spectrum(),
+				0);
+		double *uhat = new double[img.spectrum()];
+		const double h2 = -0.5 / (lamda * sigma * sigma);
+
+		if (img.depth() != 1) {
+			const CImg<> P = img.get_blur(1);
+			const int n_simu = 64;
+			CImg<> tmp(n_simu, n_simu, n_simu);
+			double val = tmp.fill(0.f).noise(sigma).blur(1).pow(2.0).sum()
+					/ (n_simu * n_simu * n_simu);
+			const double sig = sqrt(val);
+			const int patch_size_z = 0;
+			const int pxi = (int) (alpha * patch_size);
+			const int pyi = (int) (alpha * patch_size);
+			const int pzi = 2;
+			for (int zi = 0; zi < img.depth(); ++zi) {
+				for (int yi = 0; yi < img.height(); ++yi) {
+					for (int xi = 0; xi < img.width(); ++xi) {
+						cimg_forC(img,v) {
+							uhat[v] = 0;
+						}
+
+						float sw = 0, wmax = -1;
+						for (int zj = cimg::max(0, zi - pzi);
+								zi < cimg::min(img.depth(), zi + pzi + 1);
+								++zj) {
+							for (int yj = cimg::max(0, yi - pyi);
+									yi < cimg::min(img.height(), yi + pyi + 1);
+									++yj) {
+								for (int xj = cimg::max(0, xi - pxi);
+										xi
+												< cimg::min(img.width(),
+														xi + pxi + 1); ++xj) {
+									if (cimg::abs(P(xi, yi, zi) - P(xj, yj, zj))
+											/ sig < 3) {
+										double d = 0;
+										int n = 0;
+										if (xi != xj && yi != yj && zi != zj) {
+											for (int kz = -patch_size_z;
+													kz < patch_size_z + 1; kz +=
+															sampling) {
+												int zj_ = zj + kz;
+												int zi_ = zi + kz;
+												if (zj_ >= 0 && zj < img.depth()
+														&& zi_ >= 0
+														&& zi_ < img.depth()) {
+													for (int ky = -patch_size;
+															ky <= patch_size;
+															ky += sampling) {
+														int yj_ = yj + ky;
+														int yi_ = yi + ky;
+														if (yj_ >= 0
+																&& yj_
+																		< img.height()
+																&& yi_ >= 0
+																&& yi_
+																		< img.height()) {
+															for (int kx =
+																	-patch_size;
+																	kx
+																			<= patch_size;
+																	kx +=
+																			sampling) {
+																int xj_ = xj
+																		+ kx,
+																		xi_ =
+																				xi
+																						+ kx;
+																if (xj_ >= 0
+																		&& xj_
+																				< img.width()
+																		&& xi_
+																				>= 0
+																		&& xi_
+																				< img.width())
+																	cimg_forC(img,v) {
+																		double d1 =
+																				(img)(
+																						xj_,
+																						yj_,
+																						zj_,
+																						v)
+																						- (img)(
+																								xi_,
+																								yi_,
+																								zi_,
+																								v);
+																		d +=
+																				d1
+																						* d1;
+																		++n;
+																	}
+															}
+														}
+													}
+												}
+											}
+
+											float w = (float) std::exp(d * h2);
+											wmax = w > wmax ? w : wmax;
+											cimg_forC(img,v)
+												uhat[v] += w
+														* (img)(xj, yj, zj, v);
+											sw += w;
+										}
+									}
+
+									// add the central pixel
+									cimg_forC(img,v)
+										uhat[v] += wmax * (img)(xi, yi, zi, v);
+									sw += wmax;
+									cimg_forC(img,v)
+										dest(xi, yi, zi, v) =
+												(float) (uhat[v] /= sw);
+								}
+							}
+						}
+					}
+				}
+			}
+		} else { // 2D case
+			const CImg<> P = img.get_blur(1); // inspired from Mahmoudi&Sapiro SPletter dec 05
+			const int n_simu = 512;
+			CImg<> tmp(n_simu, n_simu);
+			const double sig = sqrt(
+					tmp.fill(0.f).noise(sigma).blur(1).pow(2.).sum()
+							/ (n_simu * n_simu));
+			const int pxi = (int) (alpha * patch_size), pyi = (int) (alpha
+					* patch_size); //Define the size of the neighborhood
+			for (int yi = 0; yi < img.height(); ++yi) {
+				for (int xi = 0; xi < img.width(); ++xi) {
+					cimg_forC(img,v)
+						uhat[v] = 0;
+					float sw = 0, wmax = -1;
+					for (int yj = cimg::max(0, yi - pyi);
+							yj < cimg::min(img.height(), yi + pyi + 1); ++yj)
+						for (int xj = cimg::max(0, xi - pxi);
+								xj < cimg::min(img.width(), xi + pxi + 1);
+								++xj) {
+							if (cimg::abs(P(xi, yi) - P(xj, yj)) / sig < 3.) {
+								double d = 0;
+								int n = 0;
+								if (!(xi == xj && yi == yj)) //{
+									for (int ky = -patch_size;
+											ky < patch_size + 1; ky +=
+													sampling) {
+										int yj_ = yj + ky, yi_ = yi + ky;
+										if (yj_ >= 0 && yj_ < img.height()
+												&& yi_ >= 0
+												&& yi_ < img.height())
+											for (int kx = -patch_size;
+													kx < patch_size + 1; kx +=
+															sampling) {
+												int xj_ = xj + kx, xi_ = xi
+														+ kx;
+												if (xj_ >= 0
+														&& xj_ < img.width()
+														&& xi_ >= 0
+														&& xi_ < img.width())
+//													cimg_forC(img,v) {
+//														cimg_for(img,){
+//															double d1 = (img)(xj_,yj_, v) - (img)(xi_,yi_, v);
+//															d += d1 * d1;
+//														}
+													n++;
+//													}
+											}
+										//}
+										float w = (float) exp(d * h2);
+										cimg_forC(img,v) {
+											uhat[v] += w * (img)(xj, yj, v);
+										}
+										wmax = w > wmax ? w : wmax; // Store the maximum of the weights
+										sw += w; // Compute the sum of the weights
+									}
+							}
+						}
+					// add the central pixel with the maximum weight
+					cimg_forC(img,v)
+						uhat[v] += wmax * (img)(xi, yi, v);
+					sw += wmax;
+					// Compute the estimate for the current pixel
+					cimg_forC(img,v)
+						dest(xi, yi, v) = (float) (uhat[v] /= sw);
+				}
+			} // main loop
+		} // 2d
+		delete[] uhat;
+		dest.move_to(img);
+
+		return dest;
+	}
+}
